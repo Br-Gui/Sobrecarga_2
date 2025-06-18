@@ -52,8 +52,11 @@ type Report struct {
 	CycleDetails   []CycleStats `json:"cycle_details"`
 }
 
-func checkStatus(url string, id int, wg *sync.WaitGroup, results chan<- RequestResult) {
+func checkStatus(url string, id int, wg *sync.WaitGroup, results chan<- RequestResult, sem chan struct{}) {
 	defer wg.Done()
+
+	sem <- struct{}{}
+	defer func() { <-sem }()
 
 	start := time.Now()
 	resp, err := http.Get(url)
@@ -77,13 +80,12 @@ func checkStatus(url string, id int, wg *sync.WaitGroup, results chan<- RequestR
 }
 
 func generateReport(report Report, filename string) error {
-	// Converte o relatório para JSON
+
 	reportJSON, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return fmt.Errorf("erro ao gerar relatório JSON: %v", err)
 	}
 
-	// Salva o relatório em um arquivo
 	err = ioutil.WriteFile(filename, reportJSON, 0644)
 	if err != nil {
 		return fmt.Errorf("erro ao salvar relatório em arquivo: %v", err)
@@ -94,9 +96,10 @@ func generateReport(report Report, filename string) error {
 }
 
 func main() {
-	url := "http://localhost:8025/" // URL do site
-	numGoroutines := 200            // Número de requisições simultâneas por ciclo
-	maxCycles := 3000               // Número máximo de ciclos (para evitar loop infinito)
+	url := "https://timer-sexta.vercel.app/" // URL do site
+	numGoroutines := 2000                    // Número de requisições simultâneas por ciclo
+	maxCycles := 3000                        // Número máximo de ciclos (para evitar loop infinito)
+	maxThreads := 1000                       // Aumente aqui para mais concorrência
 
 	var totalDurations []time.Duration
 	report := Report{
@@ -104,22 +107,22 @@ func main() {
 		CycleDetails:  []CycleStats{},
 	}
 
+	sem := make(chan struct{}, maxThreads)
+
 	for cycle := 1; cycle <= maxCycles; cycle++ {
 		var wg sync.WaitGroup
 		results := make(chan RequestResult, numGoroutines)
 
 		fmt.Printf("Iniciando ciclo %d...\n", cycle)
 
-		// Inicia as goroutines
 		for i := 0; i < numGoroutines; i++ {
 			wg.Add(1)
-			go checkStatus(url, i, &wg, results)
+			go checkStatus(url, i, &wg, results, sem)
 		}
 
 		wg.Wait()
 		close(results)
 
-		// Processa os resultados do ciclo
 		cycleStats := CycleStats{
 			CycleNumber:   cycle,
 			ResponseCodes: make(map[int]int),
@@ -134,13 +137,11 @@ func main() {
 				report.SuccessCount++
 				cycleStats.SuccessCount++
 
-				// Extrai o código HTTP da resposta
 				var statusCode int
 				fmt.Sscanf(result.Status, "%d", &statusCode)
 				report.ResponseCodes[statusCode]++
 				cycleStats.ResponseCodes[statusCode]++
 
-				// Calcula duração
 				duration, _ := time.ParseDuration(result.Duration)
 				totalDurations = append(totalDurations, duration)
 				cycleDurations = append(cycleDurations, duration)
@@ -150,7 +151,6 @@ func main() {
 			}
 		}
 
-		// Calcula estatísticas do ciclo
 		if len(cycleDurations) > 0 {
 			avg := calculateAverageDuration(cycleDurations)
 			min := calculateMinDuration(cycleDurations)
@@ -172,7 +172,6 @@ func main() {
 		report.CycleDetails = append(report.CycleDetails, cycleStats)
 	}
 
-	// Calcula estatísticas globais
 	if len(totalDurations) > 0 {
 		avg := calculateAverageDuration(totalDurations)
 		min := calculateMinDuration(totalDurations)
@@ -191,7 +190,6 @@ func main() {
 		report.MaxDurationMin = formatMinutes(max)
 	}
 
-	// Gera o relatório final
 	filename := "api_test_detailed_report.json"
 	err := generateReport(report, filename)
 	if err != nil {
@@ -199,7 +197,6 @@ func main() {
 	}
 }
 
-// Funções auxiliares para calcular estatísticas de duração
 func calculateAverageDuration(durations []time.Duration) time.Duration {
 	var total time.Duration
 	for _, d := range durations {
@@ -228,7 +225,6 @@ func calculateMaxDuration(durations []time.Duration) time.Duration {
 	return max
 }
 
-// Funções para formatar durações
 func formatSeconds(duration time.Duration) string {
 	seconds := duration.Seconds()
 	return fmt.Sprintf("%.3f segundos", seconds)
