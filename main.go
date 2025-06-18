@@ -96,7 +96,7 @@ func generateReport(report Report, filename string) error {
 }
 
 func main() {
-	url := "https://timer-sexta.vercel.app/" // URL do site
+	url := "" 				 // URL do site
 	numGoroutines := 2000                    // Número de requisições simultâneas por ciclo
 	maxCycles := 3000                        // Número máximo de ciclos (para evitar loop infinito)
 	maxThreads := 1000                       // Aumente aqui para mais concorrência
